@@ -8,6 +8,9 @@ on:
       announce:
         description: "Send a 'tracker is live' message"
         default: "1"
+      minutes:
+        description: "Minutes to run"
+        default: "340"
 
 concurrency:
   group: tracker
@@ -38,8 +41,14 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ANNOUNCE: ${{ github.event.inputs.announce }}
-          RUN_MINUTES: "340"
-        run: python bot.py
+          RUN_MINUTES: ${{ github.event.inputs.minutes || '340' }}
+        shell: bash
+        run: |
+          set +e
+          python -u bot.py 2>&1 | tee out.log
+          code=${PIPESTATUS[0]}
+          tail -n 8 out.log | tr -d '\r' | while IFS= read -r l; do echo "::notice::$l"; done
+          exit $code
 
       - name: Save chat id
         if: always()
