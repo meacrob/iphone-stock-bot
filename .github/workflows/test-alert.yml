@@ -13,5 +13,7 @@ jobs:
       - run: pip install requests && python -u bot.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TEST_PART: MJY04X/A
+          TEST_QUERY: "MJRR4X/A,MJRP4X/A"
+          TEST_MATCH: "iPhone 18 Pro 256GB"
+          ANNOUNCE: "0"
           RUN_MINUTES: "1"
