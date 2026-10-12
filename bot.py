@@ -85,7 +85,7 @@ def send(chat_id, text):
 
 # ---------------- Apple ----------------
 
-PART = "MJXQ4X/A"  # iPhone 18 Pro Max 256GB Burgundy (MY)
+PART = os.environ.get("TEST_PART") or "MJXQ4X/A"  # iPhone 18 Pro Max 256GB Burgundy (MY)
 BUY_URL = "https://www.apple.com/my/shop/buy-iphone/iphone-18-pro/6.9-inch-display-256gb-burgundy"
 RECS = "https://www.apple.com/my/shop/pickup-message-recommendations"
 # Ask for our part AND a sibling (256GB black) so our part shows up either way
@@ -112,7 +112,7 @@ def check_once():
                 title = ((info.get("messageTypes") or {}).get("regular") or {}).get("storePickupProductTitle", pn).replace("\u00a0", " ")
                 avail = info.get("pickupDisplay") == "available"
                 seen.add(f"{title} @ {name}: {info.get('pickupSearchQuote','')}")
-                is_ours = pn == PART or ("Pro Max 256GB Burgundy" in title)
+                is_ours = pn == PART or (not os.environ.get("TEST_PART") and "Pro Max 256GB Burgundy" in title)
                 if is_ours and avail:
                     hits[name] = info.get("pickupSearchQuote", "")
     if ok == 0:
@@ -144,7 +144,7 @@ def main():
             log(f"hits={hits} | seen={len(seen)}")
             for name, quote in hits.items():
                 if name not in alerted:
-                    send(chat_id, f"🚨 IN STOCK NOW\niPhone 18 Pro Max 256GB Burgundy\n"
+                    send(chat_id, (f"🧪 TEST ALERT ({PART}), ignore\n" if os.environ.get("TEST_PART") else "") + f"🚨 IN STOCK NOW\niPhone 18 Pro Max 256GB Burgundy\n"
                                   f"📍 Apple {name}\n🕒 {quote}\n\nBuy now 👉 {BUY_URL}")
                     alerted.add(name)
             alerted &= set(hits)  # re-alert if it sells out and comes back

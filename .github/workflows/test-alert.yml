@@ -1,0 +1,17 @@
+name: test alert
+on: workflow_dispatch
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: chat-x
+          restore-keys: chat-
+      - run: pip install requests && python -u bot.py
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TEST_PART: MJY04X/A
+          RUN_MINUTES: "1"
