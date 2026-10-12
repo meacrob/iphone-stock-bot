@@ -85,8 +85,12 @@ def send(chat_id, text):
 
 # ---------------- Apple ----------------
 
+PINNED_PART = "MJXQ4X/A"  # iPhone 18 Pro Max 256GB Burgundy (MY)
+
+
 def discover_part():
     """Find the MY part number for Pro Max 256GB Burgundy."""
+    return PINNED_PART
     try:
         html = s.get(PRODUCT_PAGE, timeout=20).text
         for m in re.finditer(r'"partNumber"\s*:\s*"([A-Z0-9]{4,6}[A-Z]{1,2}/A)"', html):
@@ -124,8 +128,18 @@ def main():
         send(chat_id, "⚠️ Tracker couldn't find the part number for Pro Max 256GB Burgundy. Ask Claude to check.")
         sys.exit("part number not found")
     log(f"Tracking {part}")
+    title = part
+    try:
+        for st in fetch([part]):
+            info = (st.get("partsAvailability") or {}).get(part)
+            if info:
+                title = (info.get("messageTypes", {}).get("regular", {}) or {}).get("storePickupProductTitle", part)
+                break
+    except Exception as e:
+        log(f"title lookup failed: {e}")
+    log(f"Apple says this part is: {title}")
     if first_time or os.environ.get("ANNOUNCE") == "1":
-        send(chat_id, f"✅ Tracker is live\niPhone 18 Pro Max 256GB Burgundy ({part})\n"
+        send(chat_id, f"✅ Tracker is live\nApple product: {title}\nPart: {part}\n"
                       f"Checking Apple TRX + Bukit Jalil every ~1 min. I'll message you the second it's available for pickup.")
 
     end = time.time() + RUN_MINUTES * 60
