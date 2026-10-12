@@ -85,85 +85,69 @@ def send(chat_id, text):
 
 # ---------------- Apple ----------------
 
-PINNED_PART = "MJXQ4X/A"  # iPhone 18 Pro Max 256GB Burgundy (MY)
+PART = "MJXQ4X/A"  # iPhone 18 Pro Max 256GB Burgundy (MY)
+BUY_URL = "https://www.apple.com/my/shop/buy-iphone/iphone-18-pro/6.9-inch-display-256gb-burgundy"
+RECS = "https://www.apple.com/my/shop/pickup-message-recommendations"
+# Ask for our part AND a sibling (256GB black) so our part shows up either way
+QUERY_PRODUCTS = [PART, "MJXN4X/A"]
 
 
-def discover_part():
-    """Find the MY part number for Pro Max 256GB Burgundy."""
-    return PINNED_PART
-    try:
-        html = s.get(PRODUCT_PAGE, timeout=20).text
-        for m in re.finditer(r'"partNumber"\s*:\s*"([A-Z0-9]{4,6}[A-Z]{1,2}/A)"', html):
-            w = html[max(0, m.start() - 900): m.end() + 900].lower()
-            if COLOR in w and CAPACITY in w and ("6_9inch" in w or "pro max" in w or "promax" in w):
-                return m.group(1)
-    except Exception as e:
-        log(f"page scrape failed: {e}")
-    # Fallback: ask the endpoint which guess it recognises
-    for p in FALLBACK_PARTS:
-        try:
-            stores = fetch([p])
-            if any(p in (st.get("partsAvailability") or {}) for st in stores):
-                return p
-        except Exception:
-            pass
-    return None
+def warm():
+    s.headers["Referer"] = BUY_URL
+    s.get(BUY_URL, timeout=20)
 
 
-def fetch(parts):
-    params = {"fae": "true", "pl": "true", "mts.0": "regular", "location": POSTCODE}
-    for i, p in enumerate(parts):
-        params[f"parts.{i}"] = p
-    r = s.get(FULFILLMENT, params=params, timeout=20)
-    r.raise_for_status()
-    return r.json()["body"]["content"]["pickupMessage"].get("stores", [])
+def check_once():
+    """Returns ({store: quote} where PART is available, set of all titles seen)."""
+    hits, seen, ok = {}, set(), 0
+    for prod in QUERY_PRODUCTS:
+        r = s.get(RECS, params={"mts.0": "regular", "mts.1": "compact", "location": POSTCODE, "product": prod}, timeout=20)
+        if r.status_code != 200 or not r.text.lstrip().startswith("{"):
+            continue
+        ok += 1
+        pm = (r.json().get("body") or {}).get("PickupMessage") or {}
+        for st in pm.get("stores", []):
+            name = st.get("storeName", "?")
+            for pn, info in (st.get("partsAvailability") or {}).items():
+                title = ((info.get("messageTypes") or {}).get("regular") or {}).get("storePickupProductTitle", pn).replace("\u00a0", " ")
+                avail = info.get("pickupDisplay") == "available"
+                seen.add(f"{title} @ {name}: {info.get('pickupSearchQuote','')}")
+                is_ours = pn == PART or ("Pro Max 256GB Burgundy" in title)
+                if is_ours and avail:
+                    hits[name] = info.get("pickupSearchQuote", "")
+    if ok == 0:
+        raise RuntimeError(f"Apple returned {r.status_code}")
+    return hits, seen
 
 
 # ---------------- Main loop ----------------
 
 def main():
     chat_id, first_time = get_chat_id()
-    part = discover_part()
-    if not part:
-        send(chat_id, "⚠️ Tracker couldn't find the part number for Pro Max 256GB Burgundy. Ask Claude to check.")
-        sys.exit("part number not found")
-    log(f"Tracking {part}")
-    title = part
-    try:
-        for st in fetch([part]):
-            info = (st.get("partsAvailability") or {}).get(part)
-            if info:
-                title = (info.get("messageTypes", {}).get("regular", {}) or {}).get("storePickupProductTitle", part)
-                break
-    except Exception as e:
-        log(f"title lookup failed: {e}")
-    log(f"Apple says this part is: {title}")
+    warm()
+    hits, seen = check_once()
+    log(f"First check OK. Seen: {seen or 'nothing nearby'}")
     if first_time or os.environ.get("ANNOUNCE") == "1":
-        send(chat_id, f"✅ Tracker is live\nApple product: {title}\nPart: {part}\n"
-                      f"Checking Apple TRX + Bukit Jalil every ~1 min. I'll message you the second it's available for pickup.")
+        send(chat_id, "✅ Tracker is live (fixed)\niPhone 18 Pro Max 256GB Burgundy\n"
+                      "Checking Apple TRX every ~1 min. I'll message you the second it's available for pickup.\n\n"
+                      "Right now: " + ("AVAILABLE!" if hits else "not available yet"))
 
     end = time.time() + RUN_MINUTES * 60
     alerted, fails = set(), 0
+    last_warm = time.time()
     while time.time() < end:
         try:
-            stores = fetch([part])
+            if time.time() - last_warm > 1800:
+                warm(); last_warm = time.time()
+            hits, seen = check_once()
             fails = 0
-            available = set()
-            for st in stores:
-                info = (st.get("partsAvailability") or {}).get(part)
-                if not info:
-                    continue
-                name = st.get("storeName", "?")
-                status = info.get("pickupDisplay")
-                quote = info.get("pickupSearchQuote", "")
-                log(f"{name}: {status} | {quote}")
-                if status == "available":
-                    available.add(name)
-                    if name not in alerted:
-                        send(chat_id, f"🚨 IN STOCK NOW\niPhone 18 Pro Max 256GB Burgundy\n"
-                                      f"📍 Apple {name}\n🕒 {quote}\n\nBuy now 👉 {PRODUCT_PAGE}")
-                        alerted.add(name)
-            alerted &= available  # re-alert if it sells out and comes back
+            log(f"hits={hits} | seen={len(seen)}")
+            for name, quote in hits.items():
+                if name not in alerted:
+                    send(chat_id, f"🚨 IN STOCK NOW\niPhone 18 Pro Max 256GB Burgundy\n"
+                                  f"📍 Apple {name}\n🕒 {quote}\n\nBuy now 👉 {BUY_URL}")
+                    alerted.add(name)
+            alerted &= set(hits)  # re-alert if it sells out and comes back
         except Exception as e:
             fails += 1
             log(f"check failed ({fails}): {e}")
