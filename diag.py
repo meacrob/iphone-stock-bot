@@ -1,24 +1,27 @@
-import json, requests
-def note(m): print("::notice::" + str(m).replace("\n", " ")[:900], flush=True)
-UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36"
-s = requests.Session(); s.headers.update({"User-Agent": UA, "Accept-Language": "en-MY,en;q=0.9"})
-s.get("https://www.apple.com/my/shop/buy-iphone/iphone-18-pro", timeout=20)  # get cookies
-tests = {
- "fm_location": ("https://www.apple.com/my/shop/fulfillment-messages", {"fae":"true","pl":"true","mts.0":"regular","parts.0":"MJXQ4X/A","location":"55188"}),
- "fm_nofae": ("https://www.apple.com/my/shop/fulfillment-messages", {"pl":"true","mts.0":"regular","parts.0":"MJXQ4X/A","location":"55188"}),
- "fm_little": ("https://www.apple.com/my/shop/fulfillment-messages", {"little":"false","parts.0":"MJXQ4X/A","mts.0":"regular","mts.1":"sticky","fts":"true","searchNearby":"true","location":"55188"}),
- "retail_avail": ("https://www.apple.com/my/shop/retail/pickup-message", {"pl":"true","parts.0":"MJXQ4X/A","location":"55188"}),
-}
-for name,(url,params) in tests.items():
+import json
+from curl_cffi import requests as cr
+import requests as rq
+def note(m): print("::notice::" + str(m).replace("\n", " ")[:600], flush=True)
+P = "MJXQ4X/A"
+REF = "https://www.apple.com/my/shop/buy-iphone/iphone-18-pro"
+def summarize(name, r):
     try:
-        r = s.get(url, params=params, timeout=20, headers={"Referer":"https://www.apple.com/my/shop/buy-iphone/iphone-18-pro","Accept":"application/json"})
-        body = r.text
-        try:
-            j = r.json(); pm = j.get("body",{}).get("content",{}).get("pickupMessage",{})
-            st = pm.get("stores",[])
-            summ = [(x.get("storeName"), {p:(i.get("pickupDisplay"), (i.get("messageTypes",{}).get("regular",{}) or {}).get("storePickupProductTitle")) for p,i in (x.get("partsAvailability") or {}).items()}) for x in st]
-            note(f"{name} {r.status_code} JSON stores={summ} keys={list(pm.keys())[:10]} errors={pm.get('errorMessage')}")
-        except Exception:
-            note(f"{name} {r.status_code} ct={r.headers.get('content-type')} body={body[:300]}")
-    except Exception as e:
-        note(f"{name} EXC {e}")
+        j = r.json(); pm = j.get("body",{}).get("content",{}).get("pickupMessage",{})
+        st = [(x.get("storeName"), {p:(i.get("pickupDisplay"), (i.get("messageTypes",{}).get("regular",{}) or {}).get("storePickupProductTitle"), i.get("pickupSearchQuote")) for p,i in (x.get("partsAvailability") or {}).items()}) for x in pm.get("stores",[])]
+        note(f"{name} {r.status_code} JSON {st if st else json.dumps(j)[:400]}")
+    except Exception:
+        note(f"{name} {r.status_code} {r.text[:120]}")
+fm = "https://www.apple.com/my/shop/fulfillment-messages"
+q = {"fae":"true","pl":"true","mts.0":"regular","parts.0":P,"location":"55188"}
+qs = {"fae":"true","pl":"true","mts.0":"regular","parts.0":P,"store":"R688"}
+for imp in ["chrome", "safari", "safari_ios"]:
+    try:
+        s = cr.Session(impersonate=imp)
+        s.get(REF, timeout=20)
+        summarize(f"{imp}-loc", s.get(fm, params=q, headers={"Referer":REF}, timeout=20))
+    except Exception as e: note(f"{imp} EXC {e}")
+# US endpoint with plain requests: is it IP-wide?
+r = rq.get("https://www.apple.com/shop/fulfillment-messages", params={"pl":"true","mts.0":"regular","parts.0":"MJXQ4LL/A","location":"10001"}, headers={"User-Agent":"Mozilla/5.0"}, timeout=20)
+summarize("plain-US", r)
+s = cr.Session(impersonate="chrome")
+summarize("chrome-US", s.get("https://www.apple.com/shop/fulfillment-messages", params={"pl":"true","mts.0":"regular","parts.0":"MJXQ4LL/A","location":"10001"}, timeout=20))
