@@ -61,7 +61,11 @@ def get_chat_id():
         return cid, False
     if os.path.exists(CHAT_FILE):
         return open(CHAT_FILE).read().strip(), False
-    upd = tg("getUpdates").get("result", [])
+    me = tg("getMe")
+    print("getMe:", "ok @" + me["result"]["username"] if me.get("ok") else me, flush=True)
+    resp = tg("getUpdates")
+    print("getUpdates:", resp.get("ok"), "count", len(resp.get("result", [])), resp.get("description", ""), flush=True)
+    upd = resp.get("result", [])
     for u in reversed(upd):
         msg = u.get("message") or u.get("edited_message")
         if msg:
