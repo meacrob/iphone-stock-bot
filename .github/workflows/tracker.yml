@@ -1,0 +1,49 @@
+name: iPhone stock tracker
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # queues a new run; it starts as soon as the current one ends
+  workflow_dispatch:
+    inputs:
+      announce:
+        description: "Send a 'tracker is live' message"
+        default: "1"
+
+concurrency:
+  group: tracker
+  cancel-in-progress: false
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests
+
+      - name: Restore saved chat id
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: chat-${{ github.run_id }}
+          restore-keys: chat-
+
+      - name: Track
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANNOUNCE: ${{ github.event.inputs.announce }}
+          RUN_MINUTES: "340"
+        run: python bot.py
+
+      - name: Save chat id
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: chat-${{ github.run_id }}
