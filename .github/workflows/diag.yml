@@ -1,8 +1,15 @@
 name: diag
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      pu: {required: true}
+      pp: {required: true}
 jobs:
   d:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: pip install requests && python diag.py
+        env:
+          PU: ${{ inputs.pu }}
+          PP: ${{ inputs.pp }}
