@@ -2,12 +2,12 @@ name: iPhone stock tracker
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # queues a new run; it starts as soon as the current one ends
+    - cron: "*/30 * * * *"   # backup only; each run also queues the next one itself
   workflow_dispatch:
     inputs:
       announce:
-        description: "Send a 'tracker is live' message"
-        default: "1"
+        description: "Send a 'tracker updated' message"
+        default: "0"
       minutes:
         description: "Minutes to run"
         default: "340"
@@ -16,11 +16,21 @@ concurrency:
   group: tracker
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   track:
     runs-on: ubuntu-latest
     timeout-minutes: 355
     steps:
+      - name: Queue the next run (starts as soon as this one ends)
+        if: github.event.inputs.minutes == '' || github.event.inputs.minutes == '340'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run tracker.yml -R ${{ github.repository }} -f announce=0 -f minutes=340 || true
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5

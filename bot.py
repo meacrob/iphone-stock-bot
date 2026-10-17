@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
 """
-iPhone 18 Pro Max 256GB Burgundy - Apple Store Malaysia pickup tracker.
+Apple Store Malaysia pickup tracker -> Telegram alerts.
 
-Runs inside GitHub Actions. Checks Apple's pickup availability for the
-Malaysian stores roughly every minute and messages you on Telegram the
-moment it shows "available".
+Runs inside GitHub Actions. Checks Apple TRX pickup availability about once a
+minute and messages you on Telegram the moment a watched model is available.
 
 Secrets/env:
   TELEGRAM_TOKEN    bot token from @BotFather (required)
-  TELEGRAM_CHAT_ID  optional; auto-detected from the last chat with the bot
+  TELEGRAM_CHAT_ID  optional; otherwise cached / auto-detected
   RUN_MINUTES       how long one run loops before exiting (default 340)
 """
 
-import json
 import os
 import random
-import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -25,23 +22,32 @@ import requests
 TOKEN = os.environ["TELEGRAM_TOKEN"].strip()
 CHAT_FILE = "state/chat_id.txt"
 RUN_MINUTES = int(os.environ.get("RUN_MINUTES", "340"))
-POLL_SECONDS = (50, 70)
-
-POSTCODE = "55188"  # KL; Apple returns nearby stores (TRX, Bukit Jalil)
-COLOR, CAPACITY = "burgundy", "256gb"
-PRODUCT_PAGE = "https://www.apple.com/my/shop/buy-iphone/iphone-18-pro"
-FULFILLMENT = "https://www.apple.com/my/shop/fulfillment-messages"
-# Fallback guesses if page scraping fails (EU code is MJXQ4HX/A; region suffix differs)
-FALLBACK_PARTS = ["MJXQ4ZP/A", "MJXQ4MY/A", "MJXQ4X/A", "MJXQ4PP/A"]
-
+POLL_SECONDS = (55, 75)
+POSTCODE = "55188"  # KL (Apple The Exchange TRX)
 MYT = timezone(timedelta(hours=8))
-s = requests.Session()
-s.headers.update({
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/129.0 Safari/537.36",
-    "Accept-Language": "en-MY,en;q=0.9",
-    "Referer": PRODUCT_PAGE,
-})
+
+UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/129.0 Safari/537.36")
+
+# ---------------- What to watch ----------------
+# A model matches if Apple's product title contains ALL words in "match".
+TARGETS = [
+    {"name": "iPhone 18 Pro Max 256GB Burgundy",
+     "match": ["Pro Max", "256GB", "Burgundy"],
+     "url": "https://www.apple.com/my/shop/buy-iphone/iphone-18-pro/6.9-inch-display-256gb-burgundy"},
+    {"name": "iPhone 18 Pro Max 512GB Burgundy",
+     "match": ["Pro Max", "512GB", "Burgundy"],
+     "url": "https://www.apple.com/my/shop/buy-iphone/iphone-18-pro/6.9-inch-display-512gb-burgundy"},
+    {"name": "iPhone Duo 256GB (any colour)",
+     "match": ["Duo", "256GB"],
+     "url": "https://www.apple.com/my/shop/buy-iphone/iphone-duo"},
+]
+# Apple's feed returns every available model in the same family, so one part
+# per family is enough. The extra parts are checked every few rounds as backup.
+MAIN_QUERIES = ["MJXQ4X/A", "MK2E4X/A"]    # Pro Max 256 Burgundy, Duo 256
+EXTRA_QUERIES = ["MJXV4X/A", "MK2K4X/A"]   # Pro Max 512 Burgundy, Duo 256 (2nd colour)
+RECS = "https://www.apple.com/my/shop/pickup-message-recommendations"
+WARM_URL = TARGETS[0]["url"]
 
 
 def log(msg):
@@ -61,118 +67,117 @@ def get_chat_id():
         return cid, False
     if os.path.exists(CHAT_FILE):
         return open(CHAT_FILE).read().strip(), False
-    me = tg("getMe")
-    print("getMe:", "ok @" + me["result"]["username"] if me.get("ok") else me, flush=True)
-    resp = tg("getUpdates")
-    print("getUpdates:", resp.get("ok"), "count", len(resp.get("result", [])), resp.get("description", ""), flush=True)
-    upd = resp.get("result", [])
-    for u in reversed(upd):
+    for u in reversed(tg("getUpdates").get("result", [])):
         msg = u.get("message") or u.get("edited_message")
         if msg:
             cid = str(msg["chat"]["id"])
             os.makedirs("state", exist_ok=True)
             open(CHAT_FILE, "w").write(cid)
             return cid, True
-    sys.exit("No chat found. Open your bot on Telegram and send it any message, then re-run.")
+    sys.exit("No chat found. Send the bot any message on Telegram, then re-run.")
 
 
 def send(chat_id, text):
-    try:
-        tg("sendMessage", chat_id=chat_id, text=text, disable_web_page_preview=True)
-    except Exception as e:
-        log(f"telegram failed: {e}")
+    for _ in range(3):
+        try:
+            if tg("sendMessage", chat_id=chat_id, text=text, disable_web_page_preview=True).get("ok"):
+                return
+        except Exception as e:
+            log(f"telegram failed: {e}")
+        time.sleep(5)
 
 
 # ---------------- Apple ----------------
 
-# What to watch: Apple's product title -> part number + buy link
-TARGETS = {
-    "iPhone 18 Pro Max 256GB Burgundy": ("MJXQ4X/A", "https://www.apple.com/my/shop/buy-iphone/iphone-18-pro/6.9-inch-display-256gb-burgundy"),
-    "iPhone 18 Pro Max 512GB Burgundy": ("MJXV4X/A", "https://www.apple.com/my/shop/buy-iphone/iphone-18-pro/6.9-inch-display-512gb-burgundy"),
-}
-RECS = "https://www.apple.com/my/shop/pickup-message-recommendations"
-TEST_MATCH = os.environ.get("TEST_MATCH", "")
-# Query each target part plus a sibling (256GB black) so targets show up either way
-QUERY_PRODUCTS = (os.environ.get("TEST_QUERY") or ",".join([p for p, _ in TARGETS.values()] + ["MJXN4X/A"])).split(",")
-WARM_URL = next(iter(TARGETS.values()))[1]
-NAMES = " + ".join(t.replace("iPhone 18 Pro Max ", "") for t in TARGETS)
+class Apple:
+    def __init__(self):
+        self.new_session()
 
+    def new_session(self):
+        self.s = requests.Session()
+        self.s.headers.update({"User-Agent": UA, "Accept-Language": "en-MY,en;q=0.9", "Referer": WARM_URL})
+        try:
+            self.s.get(WARM_URL, timeout=20)
+        except Exception as e:
+            log(f"warm failed: {e}")
+        self.born = time.time()
 
-def warm():
-    s.headers["Referer"] = WARM_URL
-    s.get(WARM_URL, timeout=20)
-
-
-def check_once():
-    """Returns ({(store, title): (quote, url)} for targets available, set of everything seen)."""
-    hits, seen, ok, r = {}, set(), 0, None
-    parts = {p: t for t, (p, _) in TARGETS.items()}
-    for prod in QUERY_PRODUCTS:
-        r = s.get(RECS, params={"mts.0": "regular", "mts.1": "compact", "location": POSTCODE, "product": prod}, timeout=20)
-        if r.status_code != 200 or not r.text.lstrip().startswith("{"):
-            continue
-        ok += 1
-        pm = (r.json().get("body") or {}).get("PickupMessage") or {}
-        for st in pm.get("stores", []):
-            name = st.get("storeName", "?")
-            for pn, info in (st.get("partsAvailability") or {}).items():
-                title = ((info.get("messageTypes") or {}).get("regular") or {}).get("storePickupProductTitle", pn).replace("\u00a0", " ")
-                quote = info.get("pickupSearchQuote", "")
-                seen.add(f"{title} @ {name}: {quote}")
-                if info.get("pickupDisplay") != "available":
-                    continue
-                if TEST_MATCH:
-                    if TEST_MATCH in title:
-                        hits[(name, title)] = (quote, WARM_URL)
-                    continue
-                target = parts.get(pn) or next((t for t in TARGETS if t in title), None)
-                if target:
-                    hits[(name, target)] = (quote, TARGETS[target][1])
-    if ok == 0:
-        raise RuntimeError(f"Apple returned {getattr(r, 'status_code', '?')}")
-    return hits, seen
+    def check(self, queries):
+        """Returns ({(store, target name): (quote, url)}, number of models seen)."""
+        hits, seen, ok, last = {}, 0, 0, "?"
+        for prod in queries:
+            try:
+                r = self.s.get(RECS, params={"mts.0": "regular", "mts.1": "compact",
+                                             "location": POSTCODE, "product": prod}, timeout=20)
+            except Exception as e:
+                last = type(e).__name__
+                continue
+            last = r.status_code
+            if r.status_code != 200 or not r.text.lstrip().startswith("{"):
+                continue
+            ok += 1
+            pm = (r.json().get("body") or {}).get("PickupMessage") or {}
+            for st in pm.get("stores", []):
+                store = st.get("storeName", "?")
+                for pn, info in (st.get("partsAvailability") or {}).items():
+                    title = (((info.get("messageTypes") or {}).get("regular") or {})
+                             .get("storePickupProductTitle", pn)).replace(" ", " ")
+                    seen += 1
+                    if info.get("pickupDisplay") != "available":
+                        continue
+                    for t in TARGETS:
+                        if all(w in title for w in t["match"]):
+                            hits[(store, t["name"])] = (f"{title} - {info.get('pickupSearchQuote', '')}", t["url"])
+            time.sleep(random.uniform(2, 5))
+        if ok == 0:
+            raise RuntimeError(f"Apple returned {last}")
+        return hits, seen
 
 
 # ---------------- Main loop ----------------
 
 def main():
     chat_id, first_time = get_chat_id()
-    warm()
-    hits, seen = check_once()
-    log(f"First check OK. Seen: {seen or 'nothing nearby'}")
-    if TEST_MATCH:
-        for x in sorted(seen): print("::notice::" + x, flush=True)
+    apple = Apple()
+    watching = "\n".join(f"- {t['name']}" for t in TARGETS)
     if first_time or os.environ.get("ANNOUNCE") == "1":
-        now = ", ".join(f"{t.replace('iPhone 18 Pro Max ', '')}" for (_, t) in hits) or "nothing yet"
-        send(chat_id, f"✅ Tracker updated\niPhone 18 Pro Max Burgundy: {NAMES}\n"
-                      f"Checking Apple TRX every ~1 min. I'll message you the second either is available for pickup.\n\n"
-                      f"Available right now: {now}")
+        send(chat_id, f"✅ Tracker updated\nWatching at Apple TRX (every ~1 min):\n{watching}\n\n"
+                      f"I'll message you the moment any of these is available for pickup.")
 
     end = time.time() + RUN_MINUTES * 60
-    alerted, fails = set(), 0
-    last_warm = time.time()
+    alerted, fails, down_since, warned, rnd = set(), 0, None, False, 0
     while time.time() < end:
+        rnd += 1
+        queries = MAIN_QUERIES + (EXTRA_QUERIES if rnd % 3 == 0 else [])
         try:
-            if time.time() - last_warm > 1800:
-                warm(); last_warm = time.time()
-            hits, seen = check_once()
-            fails = 0
-            log(f"hits={list(hits)} | seen={len(seen)}")
-            for (name, title), (quote, url) in hits.items():
-                if (name, title) not in alerted:
-                    prefix = f"🧪 TEST ALERT (matched '{TEST_MATCH}'), ignore\n" if TEST_MATCH else ""
-                    send(chat_id, f"{prefix}🚨 IN STOCK NOW\n{title}\n📍 Apple {name}\n🕒 {quote}\n\nBuy now 👉 {url}")
-                    alerted.add((name, title))
+            if time.time() - apple.born > 1800:
+                apple.new_session()
+            hits, seen = apple.check(queries)
+            if warned:
+                send(chat_id, "✅ Apple is responding again, tracking resumed.")
+            fails, down_since, warned = 0, None, False
+            log(f"ok | seen={seen} | hits={list(hits)}")
+            for key, (detail, url) in hits.items():
+                if key not in alerted:
+                    store, name = key
+                    send(chat_id, f"🚨 IN STOCK NOW\n{detail}\n📍 Apple {store}\n\nBuy now 👉 {url}")
+                    alerted.add(key)
             alerted &= set(hits)  # re-alert if it sells out and comes back
         except Exception as e:
             fails += 1
+            down_since = down_since or time.time()
             log(f"check failed ({fails}): {e}")
-            if fails == 15:
-                send(chat_id, f"⚠️ Tracker having trouble reaching Apple: {e}")
-            time.sleep(min(300, 20 * fails))
+            if fails % 3 == 0:
+                apple.new_session()  # fresh cookies often clears Apple's 503s
+            # Only bother you if Apple has been unreachable for 30+ min straight
+            if not warned and time.time() - down_since > 1800:
+                send(chat_id, f"⚠️ Apple's stock check has been failing for 30 min ({e}). "
+                              f"I'll keep retrying and tell you when it's back.")
+                warned = True
+            time.sleep(min(300, 30 * fails))
             continue
         time.sleep(random.uniform(*POLL_SECONDS))
-    log("Run window finished; next scheduled run takes over.")
+    log("Run window finished; next run takes over.")
 
 
 if __name__ == "__main__":
