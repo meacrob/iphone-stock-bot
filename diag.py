@@ -1,33 +1,26 @@
-import re, json, requests
+import re, json, requests, traceback
 OUT=[]
 def note(m): OUT.append(str(m).replace("\n"," ")[:400])
-s = requests.Session(); s.headers.update({"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36", "Accept-Language": "en-MY,en;q=0.9"})
-h = s.get("https://www.apple.com/my/shop/buy-iphone", timeout=20).text
-links = sorted(set(re.findall(r'/my/shop/buy-iphone/[a-z0-9\-]+', h)))
-note("buy links: " + " ".join(links))
-for path in [l for l in links if "duo" in l] or ["/my/shop/buy-iphone/iphone-duo"]:
-    url = "https://www.apple.com" + path
-    r = s.get(url, timeout=20); note(f"{url} {r.status_code} len {len(r.text)}")
-    html = r.text
-    for m in re.finditer(r'"partNumber"\s*:\s*"([A-Z0-9]{4,6}X/A)"', html):
-        w = html[max(0,m.start()-700):m.end()+700]
-        cap = re.search(r'"dimensionCapacity"\s*:\s*"(\w+)"', w); col = re.search(r'"dimensionColor"\s*:\s*"([\w\-]+)"', w)
-        note(f"PART {m.group(1)} cap={cap.group(1) if cap else '?'} color={col.group(1) if col else '?'}")
-    slugs = sorted(set(re.findall(re.escape(path) + r'/[a-z0-9\-]+', html)))
-    note("slugs: " + " ".join(slugs[:30]))
-    # titles via recs
-    parts = sorted(set(re.findall(r'"([A-Z0-9]{4,6}X/A)"', html)))
-    note(f"parts on page: {' '.join(parts)}")
+try:
+    s = requests.Session(); s.headers.update({"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36", "Accept-Language": "en-MY,en;q=0.9"})
+    url = "https://www.apple.com/my/shop/buy-iphone/iphone-duo"
+    html = s.get(url, timeout=20).text
     s.headers["Referer"] = url
-    for p in parts[:3]:
+    # product titles near part numbers in page JSON
+    for m in re.finditer(r'"([A-Z0-9]{4,6}X/A)"\s*:\s*\{', html):
+        w = html[m.end(): m.end()+1500]
+        t = re.search(r'"(?:productTitle|title|name)"\s*:\s*"([^"]{5,90})"', w)
+        note(f"obj {m.group(1)} -> {t.group(1) if t else '?'}")
+    slugs = sorted(set(re.findall(r'iphone-duo/[a-z0-9\-]{6,}', html)))
+    note("slugs: " + " ".join(slugs[:30]))
+    for p in ["MK2D4X/A","MK2E4X/A","MK2F4X/A","MK2G4X/A","MK2H4X/A","MK2J4X/A","MK2K4X/A","MK2L4X/A"]:
         rr = s.get("https://www.apple.com/my/shop/pickup-message-recommendations", params={"mts.0":"regular","mts.1":"compact","location":"55188","product":p}, timeout=20)
-        try:
-            pm = rr.json()["body"].get("PickupMessage") or {}
-            for st in pm.get("stores", []):
-                for pn, i in (st.get("partsAvailability") or {}).items():
-                    note(f"recs({p}) {pn} {(i.get('messageTypes',{}).get('regular',{}) or {}).get('storePickupProductTitle')} {i.get('pickupDisplay')}")
-            if not pm.get("stores"): note(f"recs({p}) no stores: {json.dumps(rr.json()['body'])[:200]}")
-        except Exception as e: note(f"recs({p}) {rr.status_code} {rr.text[:80]}")
-
+        if not rr.text.lstrip().startswith("{"): note(f"recs({p}) {rr.status_code}"); continue
+        b = rr.json().get("body") or {}
+        pm = b.get("PickupMessage") or {}
+        got = [f"{pn}={(i.get('messageTypes',{}).get('regular',{}) or {}).get('storePickupProductTitle')}:{i.get('pickupDisplay')}" for st in pm.get("stores",[]) for pn,i in (st.get("partsAvailability") or {}).items()]
+        note(f"recs({p}) -> {got or b.get('noSimilarModelsText','none')}")
+except Exception:
+    note(traceback.format_exc())
 txt=" || ".join(OUT)
 for i in range(0, min(len(txt), 9*3000), 3000): print("::notice::"+txt[i:i+3000])
