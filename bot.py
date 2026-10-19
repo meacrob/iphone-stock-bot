@@ -32,12 +32,6 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 # ---------------- What to watch ----------------
 # A model matches if Apple's product title contains ALL words in "match".
 TARGETS = [
-    {"name": "iPhone 18 Pro Max 256GB Burgundy",
-     "match": ["Pro Max", "256GB", "Burgundy"],
-     "url": "https://www.apple.com/my/shop/buy-iphone/iphone-18-pro/6.9-inch-display-256gb-burgundy"},
-    {"name": "iPhone 18 Pro Max 512GB Burgundy",
-     "match": ["Pro Max", "512GB", "Burgundy"],
-     "url": "https://www.apple.com/my/shop/buy-iphone/iphone-18-pro/6.9-inch-display-512gb-burgundy"},
     {"name": "iPhone Duo 256GB",
      "match": ["Duo", "256GB"],
      "url": "https://www.apple.com/my/shop/buy-iphone/iphone-duo"},
@@ -47,10 +41,8 @@ TARGETS = [
 ]
 # Apple's feed returns every available model in the same family, so one part
 # per family is enough. Every round also checks one extra part in rotation as backup.
-MAIN_QUERIES = ["MJXQ4X/A", "MK2E4X/A"]    # Pro Max 256 Burgundy, Duo 256
-EXTRA_QUERIES = ["MJXV4X/A",               # Pro Max 512 Burgundy
-                 "MK2D4X/A", "MK2F4X/A", "MK2G4X/A", "MK2H4X/A",   # all other Duo parts
-                 "MK2J4X/A", "MK2K4X/A", "MK2L4X/A"]
+MAIN_QUERIES = ["MK2E4X/A", "MK2K4X/A"]    # Duo 256 Star White, Duo 256 Night Sky
+EXTRA_QUERIES = ["MK2G4X/A", "MK2D4X/A"]   # Duo 512 Star White, Duo 512 Night Sky
 RECS = "https://www.apple.com/my/shop/pickup-message-recommendations"
 WARM_URL = TARGETS[0]["url"]
 
@@ -165,7 +157,10 @@ def main():
             for key, (detail, url) in hits.items():
                 if key not in alerted:
                     store, name = key
-                    send(chat_id, f"🚨 IN STOCK NOW\n{detail}\n📍 Apple {store}\n\nBuy now 👉 {url}")
+                    send(chat_id, f"🚨🚨 IN STOCK NOW 🚨🚨\n{detail}\n📍 Apple {store}\n\nBuy now 👉 {url}")
+                    for n in (2, 3):  # extra pings so you don't sleep through it
+                        time.sleep(12)
+                        send(chat_id, f"⏰ ({n}/3) DUO IN STOCK - go go go 👉 {url}")
                     alerted.add(key)
             alerted &= set(hits)  # re-alert if it sells out and comes back
         except Exception as e:
