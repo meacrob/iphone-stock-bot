@@ -157,10 +157,11 @@ def main():
             for key, (detail, url) in hits.items():
                 if key not in alerted:
                     store, name = key
-                    send(chat_id, f"🚨🚨 IN STOCK NOW 🚨🚨\n{detail}\n📍 Apple {store}\n\nBuy now 👉 {url}")
+                    send(chat_id, f"🚨🚨 IN STOCK NOW 🚨🚨\n{detail}\n📍 Apple {store}\n\n"
+                                  f"🛍 Your bag 👉 https://www.apple.com/my/shop/bag\n🔗 Product page 👉 {url}")
                     for n in (2, 3):  # extra pings so you don't sleep through it
                         time.sleep(12)
-                        send(chat_id, f"⏰ ({n}/3) DUO IN STOCK - go go go 👉 {url}")
+                        send(chat_id, f"⏰ ({n}/3) DUO IN STOCK - go go go 👉 https://www.apple.com/my/shop/bag")
                     alerted.add(key)
             alerted &= set(hits)  # re-alert if it sells out and comes back
         except Exception as e:
