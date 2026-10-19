@@ -162,7 +162,8 @@ def main():
                 if key not in alerted:
                     store, name = key
                     send(chat_id, f"🚨🚨 IN STOCK NOW 🚨🚨\n{detail}\n📍 Apple {store}\n\n"
-                                  f"🛍 Checkout 👉 https://www.apple.com/my/shop/bag")
+                                  f"🛍 Checkout 👉 https://www.apple.com/my/shop/bag\n"
+                                  f"🔗 Not in bag? Product page 👉 {url}")
                     for n in (2, 3):  # extra pings so you don't sleep through it
                         time.sleep(12)
                         send(chat_id, f"⏰ ({n}/3) DUO IN STOCK - go go go 👉 https://www.apple.com/my/shop/bag")
