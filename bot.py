@@ -38,11 +38,15 @@ TARGETS = [
     {"name": "iPhone Duo 512GB",
      "match": ["Duo", "512GB"],
      "url": "https://www.apple.com/my/shop/buy-iphone/iphone-duo"},
+    {"name": "iPhone Duo 1TB",
+     "match": ["Duo", "1TB"],
+     "url": "https://www.apple.com/my/shop/buy-iphone/iphone-duo"},
 ]
 # Apple's feed returns every available model in the same family, so one part
 # per family is enough. Every round also checks one extra part in rotation as backup.
 MAIN_QUERIES = ["MK2E4X/A", "MK2K4X/A"]    # Duo 256 Star White, Duo 256 Night Sky
-EXTRA_QUERIES = ["MK2G4X/A", "MK2D4X/A"]   # Duo 512 Star White, Duo 512 Night Sky
+EXTRA_QUERIES = ["MK2G4X/A", "MK2D4X/A",  # Duo 512 Star White, Duo 512 Night Sky
+                 "MK2H4X/A", "MK2F4X/A"]  # Duo 1TB Star White, Duo 1TB Night Sky
 RECS = "https://www.apple.com/my/shop/pickup-message-recommendations"
 WARM_URL = TARGETS[0]["url"]
 
@@ -158,7 +162,7 @@ def main():
                 if key not in alerted:
                     store, name = key
                     send(chat_id, f"🚨🚨 IN STOCK NOW 🚨🚨\n{detail}\n📍 Apple {store}\n\n"
-                                  f"🛍 Your bag 👉 https://www.apple.com/my/shop/bag\n🔗 Product page 👉 {url}")
+                                  f"🛍 Checkout 👉 https://www.apple.com/my/shop/bag")
                     for n in (2, 3):  # extra pings so you don't sleep through it
                         time.sleep(12)
                         send(chat_id, f"⏰ ({n}/3) DUO IN STOCK - go go go 👉 https://www.apple.com/my/shop/bag")
