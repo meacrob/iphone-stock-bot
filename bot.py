@@ -38,9 +38,11 @@ TARGETS = [
     {"name": "iPhone 18 Pro Max 512GB Burgundy",
      "match": ["Pro Max", "512GB", "Burgundy"],
      "url": "https://www.apple.com/my/shop/buy-iphone/iphone-18-pro/6.9-inch-display-512gb-burgundy"},
-    # TEST MODE: any Duo size/colour, to prove Duo alerts work. Narrow to 256GB later.
-    {"name": "iPhone Duo (any size/colour) [test]",
-     "match": ["Duo"],
+    {"name": "iPhone Duo 256GB",
+     "match": ["Duo", "256GB"],
+     "url": "https://www.apple.com/my/shop/buy-iphone/iphone-duo"},
+    {"name": "iPhone Duo 512GB",
+     "match": ["Duo", "512GB"],
      "url": "https://www.apple.com/my/shop/buy-iphone/iphone-duo"},
 ]
 # Apple's feed returns every available model in the same family, so one part
@@ -163,8 +165,7 @@ def main():
             for key, (detail, url) in hits.items():
                 if key not in alerted:
                     store, name = key
-                    tag = "🧪 DUO TEST WORKED\n" if "[test]" in name else ""
-                    send(chat_id, f"{tag}🚨 IN STOCK NOW\n{detail}\n📍 Apple {store}\n\nBuy now 👉 {url}")
+                    send(chat_id, f"🚨 IN STOCK NOW\n{detail}\n📍 Apple {store}\n\nBuy now 👉 {url}")
                     alerted.add(key)
             alerted &= set(hits)  # re-alert if it sells out and comes back
         except Exception as e:
