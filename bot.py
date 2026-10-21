@@ -104,7 +104,7 @@ class Apple:
         self.born = time.time()
 
     def check(self, queries):
-        """Returns ({(store, target name): (quote, url)}, number of models seen)."""
+        """Returns ({(store, model title): (quote, url)}, number of models seen)."""
         hits, seen, ok, last = {}, 0, 0, "?"
         for prod in queries:
             try:
@@ -128,11 +128,41 @@ class Apple:
                         continue
                     for t in TARGETS:
                         if all(w in title for w in t["match"]):
-                            hits[(store, t["name"])] = (f"{title} - {info.get('pickupSearchQuote', '')}", t["url"])
+                            hits[(store, title)] = (info.get("pickupSearchQuote", ""), t["url"])
             time.sleep(random.uniform(2, 5))
         if ok == 0:
             raise RuntimeError(f"Apple returned {last}")
         return hits, seen
+
+
+# ---------------- Stock window tracking ----------------
+
+LIVE_FILE = "state/live.json"
+
+
+def hhmm(ts):
+    return datetime.fromtimestamp(ts, MYT).strftime("%I:%M %p").lstrip("0")
+
+
+def load_live():
+    try:
+        import json
+        return json.load(open(LIVE_FILE))
+    except Exception:
+        return {}
+
+
+def save_live(live):
+    import json
+    os.makedirs("state", exist_ok=True)
+    json.dump(live, open(LIVE_FILE, "w"))
+
+
+def gone_alert(chat_id, k, v):
+    store, title = k.split("|", 1)
+    mins = max(1, round((v["last"] - v["first"]) / 60))
+    send(chat_id, f"❌ GONE - no longer available for pickup\n{title}\n📍 Apple {store}\n"
+                  f"🕒 Available {hhmm(v['first'])} to about {hhmm(v['last'])} (~{mins} min)")
 
 
 # ---------------- Main loop ----------------
@@ -146,7 +176,13 @@ def main():
                       f"I'll message you the moment any of these is available for pickup.")
 
     end = time.time() + RUN_MINUTES * 60
-    alerted, fails, down_since, warned, rnd = set(), 0, None, False, 0
+    fails, down_since, warned, rnd = 0, None, False, 0
+    live = load_live()   # {"store|title": {"first": ts, "last": ts, "miss": n}}
+    # Anything carried over from the previous run that went stale: report it gone
+    for k, v in list(live.items()):
+        if time.time() - v["last"] > 600:
+            gone_alert(chat_id, k, v)
+            live.pop(k)
     while time.time() < end:
         rnd += 1
         queries = MAIN_QUERIES + [EXTRA_QUERIES[rnd % len(EXTRA_QUERIES)]]
@@ -157,18 +193,30 @@ def main():
             if warned:
                 send(chat_id, "✅ Apple is responding again, tracking resumed.")
             fails, down_since, warned = 0, None, False
+            now = time.time()
             log(f"ok | seen={seen} | hits={list(hits)}")
-            for key, (detail, url) in hits.items():
-                if key not in alerted:
-                    store, name = key
-                    send(chat_id, f"🚨🚨 IN STOCK NOW 🚨🚨\n{detail}\n📍 Apple {store}\n\n"
-                                  f"🛍 Checkout 👉 https://www.apple.com/my/shop/bag\n"
-                                  f"🔗 Not in bag? Product page 👉 {url}")
-                    for n in (2, 3):  # extra pings so you don't sleep through it
-                        time.sleep(12)
-                        send(chat_id, f"⏰ ({n}/3) DUO IN STOCK - go go go 👉 https://www.apple.com/my/shop/bag")
-                    alerted.add(key)
-            alerted &= set(hits)  # re-alert if it sells out and comes back
+            for (store, title), (quote, url) in hits.items():
+                k = f"{store}|{title}"
+                if k in live:
+                    live[k]["last"], live[k]["miss"] = now, 0
+                    continue
+                live[k] = {"first": now, "last": now, "miss": 0}
+                send(chat_id, f"🚨🚨 IN STOCK NOW 🚨🚨\n{title} - {quote}\n📍 Apple {store}\n"
+                              f"🕒 Spotted at {hhmm(now)}\n\n"
+                              f"🛍 Checkout 👉 https://www.apple.com/my/shop/bag\n"
+                              f"🔗 Not in bag? Product page 👉 {url}")
+                for n in (2, 3):  # extra pings so you don't sleep through it
+                    time.sleep(12)
+                    send(chat_id, f"⏰ ({n}/3) DUO IN STOCK - go go go 👉 https://www.apple.com/my/shop/bag")
+            # Not seen this round: needs 2 misses in a row before we call it gone (avoids blips)
+            current = {f"{s}|{ti}" for s, ti in hits}
+            for k in list(live):
+                if k in current:
+                    continue
+                live[k]["miss"] += 1
+                if live[k]["miss"] >= 2:
+                    gone_alert(chat_id, k, live.pop(k))
+            save_live(live)
         except Exception as e:
             fails += 1
             down_since = down_since or time.time()
