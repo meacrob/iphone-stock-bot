@@ -14,6 +14,7 @@ Secrets/env:
 import os
 import random
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -22,7 +23,7 @@ import requests
 TOKEN = os.environ["TELEGRAM_TOKEN"].strip()
 CHAT_FILE = "state/chat_id.txt"
 RUN_MINUTES = int(os.environ.get("RUN_MINUTES", "340"))
-POLL_SECONDS = (55, 75)
+POLL_SECONDS = (17, 23)  # ~every 20s; 1 request per check keeps Apple load the same as before
 POSTCODE = "55188"  # KL (Apple The Exchange TRX)
 MYT = timezone(timedelta(hours=8))
 
@@ -129,7 +130,8 @@ class Apple:
                     for t in TARGETS:
                         if all(w in title for w in t["match"]):
                             hits[(store, title)] = (info.get("pickupSearchQuote", ""), t["url"])
-            time.sleep(random.uniform(2, 5))
+            if len(queries) > 1:
+                time.sleep(random.uniform(2, 5))
         if ok == 0:
             raise RuntimeError(f"Apple returned {last}")
         return hits, seen
@@ -158,6 +160,12 @@ def save_live(live):
     json.dump(live, open(LIVE_FILE, "w"))
 
 
+def follow_up_pings(chat_id):
+    for n in (2, 3):  # extra pings so you don't sleep through it
+        time.sleep(10)
+        send(chat_id, f"⏰ ({n}/3) DUO IN STOCK - go go go 👉 https://www.apple.com/my/shop/bag")
+
+
 def gone_alert(chat_id, k, v):
     store, title = k.split("|", 1)
     mins = max(1, round((v["last"] - v["first"]) / 60))
@@ -172,7 +180,7 @@ def main():
     apple = Apple()
     watching = "\n".join(f"- {t['name']}" for t in TARGETS)
     if first_time or os.environ.get("ANNOUNCE") == "1":
-        send(chat_id, f"✅ Tracker updated\nWatching at Apple TRX (every ~1 min):\n{watching}\n\n"
+        send(chat_id, f"✅ Tracker updated\nWatching at Apple TRX (every ~20 sec):\n{watching}\n\n"
                       f"I'll message you the moment any of these is available for pickup.")
 
     end = time.time() + RUN_MINUTES * 60
@@ -185,7 +193,8 @@ def main():
             live.pop(k)
     while time.time() < end:
         rnd += 1
-        queries = MAIN_QUERIES + [EXTRA_QUERIES[rnd % len(EXTRA_QUERIES)]]
+        allq = MAIN_QUERIES + EXTRA_QUERIES
+        queries = [allq[rnd % len(allq)]]  # one Duo part per check; Apple returns the whole Duo family
         try:
             if time.time() - apple.born > 1800:
                 apple.new_session()
@@ -205,16 +214,14 @@ def main():
                               f"🕒 Spotted at {hhmm(now)}\n\n"
                               f"🛍 Checkout 👉 https://www.apple.com/my/shop/bag\n"
                               f"🔗 Not in bag? Product page 👉 {url}")
-                for n in (2, 3):  # extra pings so you don't sleep through it
-                    time.sleep(12)
-                    send(chat_id, f"⏰ ({n}/3) DUO IN STOCK - go go go 👉 https://www.apple.com/my/shop/bag")
+                threading.Thread(target=follow_up_pings, args=(chat_id,), daemon=True).start()
             # Not seen this round: needs 2 misses in a row before we call it gone (avoids blips)
             current = {f"{s}|{ti}" for s, ti in hits}
             for k in list(live):
                 if k in current:
                     continue
                 live[k]["miss"] += 1
-                if live[k]["miss"] >= 2:
+                if live[k]["miss"] >= 3:
                     gone_alert(chat_id, k, live.pop(k))
             save_live(live)
         except Exception as e:
