@@ -239,6 +239,48 @@ def fill_if_empty(page, label_pattern, value):
         pass
 
 
+def fill_any(page, selectors, labels, value, name):
+    """Fill the first matching empty field in the page or any iframe (card fields are often in iframes)."""
+    if not value:
+        return False
+    for fr in page.frames:
+        cands = [fr.locator(s) for s in selectors] + [fr.get_by_label(re.compile(labels, re.I)),
+                                                       fr.get_by_placeholder(re.compile(labels, re.I))]
+        for loc in cands:
+            try:
+                loc = loc.first
+                if loc.is_visible() and not loc.input_value():
+                    loc.fill(value)
+                    log(f"filled: {name}")
+                    return True
+            except Exception:
+                pass
+    return False
+
+
+def fill_card(page):
+    """Choose card payment, fill the card from config.ini, go to Review. Never clicks Place Order."""
+    num = cfg("card", "number").replace(" ", "")
+    if not num:
+        return False
+    first_visible(page, [text(r"credit or debit card")], timeout=3) and \
+        click(page, "Card option", [css('[data-autom*="credit" i]'), lambda p: p.get_by_label(re.compile(r"credit or debit card", re.I)),
+                                    text(r"credit or debit card")], timeout=5)
+    page.wait_for_timeout(1200)
+    fill_any(page, ['input[autocomplete="cc-number"]', 'input[name*="cardNumber" i]'], r"card number", num, "card number")
+    exp = cfg("card", "expiry")  # MM/YY
+    fill_any(page, ['input[autocomplete="cc-exp"]', 'input[name*="expiration" i]'], r"expir|MM ?/ ?YY", exp, "expiry")
+    fill_any(page, ['input[autocomplete="cc-csc"]', 'input[name*="security" i]', 'input[name*="cvv" i]'],
+             r"cvv|cvc|security code", cfg("card", "cvv"), "cvv")
+    fill_any(page, ['input[autocomplete="cc-name"]'], r"name on card|cardholder", cfg("card", "name_on_card"), "name on card")
+    shot(page, "6-card")
+    click(page, "Review order", [css('[data-autom="continue-button-label"]'), btn(r"review (your )?order"),
+                                 btn(r"continue to review"), btn(r"^\s*continue\s*$")], timeout=10)
+    page.wait_for_timeout(2000)
+    shot(page, "7-review")
+    return bool(first_visible(page, [btn(r"place (your )?order")], timeout=8))
+
+
 def on_payment_page(page):
     return bool(first_visible(page, [text(r"how (would|do) you (like to )?pay"), text(r"payment method"),
                                      text(r"credit or debit card")], timeout=1))
@@ -318,6 +360,13 @@ def checkout(page, keep_title=None):
 
     shot(page, "5-payment")
     ok = on_payment_page(page)
+    if ok and cfg("card", "number"):
+        try:
+            if fill_card(page):
+                log(f"checkout reached REVIEW (Place Order) in {time.time() - t0:.0f}s")
+                return "review", time.time() - t0
+        except StepFailed as e:
+            log(f"card step stuck at {e}; leaving it on payment")
     log(f"checkout reached {'PAYMENT' if ok else 'unknown page'} in {time.time() - t0:.0f}s")
     return ok, time.time() - t0
 
@@ -335,7 +384,10 @@ def run_checkout(page, keep_title, label):
     try:
         ok, secs = checkout(page, keep_title)
         beep(8)
-        if ok:
+        if ok == "review":
+            ping(f"💳 PLACE ORDER NOW - {label}\nCard is filled, bot is on the final screen ({secs:.0f}s).\n"
+                 f"Go to the PC, tap Place Order, then approve the OTP / bank app.")
+        elif ok:
             ping(f"💳 PAY NOW - {label}\nBot reached the payment step in {secs:.0f}s.\n"
                  f"Go to the PC, pick your card, enter the OTP and place the order.")
         else:
